@@ -101,3 +101,64 @@
     return null;
   }
 })();
+
+/* ===== 非官方镜像声明弹窗（仅首次访问显示一次） ===== */
+(function () {
+  'use strict';
+  var KEY = 'mirror_notice_dismissed';
+  var seen = false;
+  try { seen = !!window.localStorage.getItem(KEY); } catch (e) { seen = true; }
+  if (seen) return;
+
+  function boot() {
+    if (document.getElementById('mirror-notice-mask')) return;
+
+    var style = document.createElement('style');
+    style.textContent = [
+      '#mirror-notice-mask{position:fixed;left:0;top:0;right:0;bottom:0;z-index:99999;background:rgba(0,0,0,.45);display:flex;align-items:center;justify-content:center;padding:20px;}',
+      '#mirror-notice-box{max-width:420px;width:100%;background:#fff;border-radius:10px;box-shadow:0 12px 40px rgba(0,0,0,.25);overflow:hidden;font-family:system-ui,-apple-system,"PingFang SC","Microsoft YaHei",sans-serif;}',
+      '#mirror-notice-box .mn-head{background:#1e5eb4;color:#fff;padding:14px 18px;font-size:16px;font-weight:600;letter-spacing:2px;}',
+      '#mirror-notice-box .mn-body{padding:16px 18px 10px;color:#333;font-size:14px;line-height:1.9;}',
+      '#mirror-notice-box .mn-body p{margin:0 0 6px;}',
+      '#mirror-notice-box .mn-body b{color:#1e5eb4;}',
+      '#mirror-notice-box .mn-foot{display:flex;gap:10px;padding:8px 18px 18px;}',
+      '#mirror-notice-box .mn-btn{flex:1;padding:10px 0;border-radius:6px;border:1px solid #1e5eb4;font-size:14px;cursor:pointer;text-align:center;box-sizing:border-box;text-decoration:none;display:block;}',
+      '#mirror-notice-box .mn-btn-primary{background:#1e5eb4;color:#fff;}',
+      '#mirror-notice-box .mn-btn-plain{background:#fff;color:#1e5eb4;}'
+    ].join('');
+    document.head.appendChild(style);
+
+    var mask = document.createElement('div');
+    mask.id = 'mirror-notice-mask';
+    mask.innerHTML = [
+      '<div id="mirror-notice-box" role="dialog" aria-modal="true">',
+      '  <div class="mn-head">访问须知</div>',
+      '  <div class="mn-body">',
+      '    <p>本站为四川省江油中学校园网的<b>非官方静态镜像</b>，仅用于官网访问不畅时应急查阅。</p>',
+      '    <p>页面内容为 <b>2026 年 9 月</b>的快照，此后学校发布的新通知不再同步更新。</p>',
+      '    <p>招生、考试、放假等重要信息，请以<b>学校官方网站</b>发布为准。</p>',
+      '  </div>',
+      '  <div class="mn-foot">',
+      '    <a class="mn-btn mn-btn-plain" id="mirror-notice-ok" href="javascript:void(0)">知道了</a>',
+      '    <a class="mn-btn mn-btn-primary" id="mirror-notice-go" href="http://www.scsjyzx.cn/" target="_blank" rel="noopener">前往学校官网</a>',
+      '  </div>',
+      '</div>'
+    ].join('');
+    document.body.appendChild(mask);
+
+    function dismiss() {
+      try { window.localStorage.setItem(KEY, String(Date.now())); } catch (e) {}
+      mask.remove();
+      style.remove();
+    }
+    document.getElementById('mirror-notice-ok').addEventListener('click', dismiss);
+    document.getElementById('mirror-notice-go').addEventListener('click', dismiss);
+    mask.addEventListener('click', function (e) { if (e.target === mask) dismiss(); });
+  }
+
+  if (document.readyState === 'loading') {
+    document.addEventListener('DOMContentLoaded', boot);
+  } else {
+    boot();
+  }
+})();
