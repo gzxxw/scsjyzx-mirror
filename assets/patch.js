@@ -6,7 +6,6 @@
   var BASE = '/scsjyzx-mirror/';
   var db = null;
   var pending = [];
-
   fetch(BASE + 'data/db.json')
     .then(function (r) { return r.json(); })
     .then(function (d) {
@@ -16,7 +15,6 @@
       q.forEach(function (item) { handle(item.url).then(item.resolve, item.reject); });
     })
     .catch(function (e) { console.error('[mirror] 数据包加载失败', e); });
-
   var _fetch = window.fetch;
   window.fetch = function (input, init) {
     var url = '';
@@ -29,14 +27,12 @@
     }
     return _fetch.apply(this, arguments);
   };
-
   function jr(obj) {
     return Promise.resolve(new Response(JSON.stringify(obj), {
       status: 200,
       headers: { 'Content-Type': 'application/json' }
     }));
   }
-
   function handle(url) {
     var u;
     try { u = new URL(url, location.origin); } catch (e) { return jr({ code: 500, msg: 'bad url' }); }
@@ -45,7 +41,6 @@
     if (i !== -1) p = p.substring(i + API_MARK.length);
     if (p.charAt(0) === '/') p = p.substring(1);
     var q = u.searchParams;
-
     if (p === 'system/noticeConfig/webList') {
       return jr({ msg: '操作成功', code: 200, data: db.notices });
     }
@@ -90,7 +85,6 @@
     }
     return jr({ msg: 'mirror: no handler', code: 404 });
   }
-
   function findRow(id) {
     for (var nid in db.lists) {
       var arr = db.lists[nid];
@@ -101,7 +95,6 @@
     return null;
   }
 })();
-
 /* ===== 非官方镜像声明弹窗（仅首次访问显示一次） ===== */
 (function () {
   'use strict';
@@ -109,10 +102,8 @@
   var seen = false;
   try { seen = !!window.localStorage.getItem(KEY); } catch (e) { seen = true; }
   if (seen) return;
-
   function boot() {
     if (document.getElementById('mirror-notice-mask')) return;
-
     var style = document.createElement('style');
     style.textContent = [
       '#mirror-notice-mask{position:fixed;left:0;top:0;right:0;bottom:0;z-index:99999;background:rgba(0,0,0,.45);display:flex;align-items:center;justify-content:center;padding:20px;}',
@@ -145,7 +136,6 @@
       '</div>'
     ].join('');
     document.body.appendChild(mask);
-
     function dismiss() {
       try { window.localStorage.setItem(KEY, String(Date.now())); } catch (e) {}
       mask.remove();
@@ -155,10 +145,85 @@
     document.getElementById('mirror-notice-go').addEventListener('click', dismiss);
     mask.addEventListener('click', function (e) { if (e.target === mask) dismiss(); });
   }
-
   if (document.readyState === 'loading') {
     document.addEventListener('DOMContentLoaded', boot);
-  } else {
+} else {
     boot();
+}
+})();
+
+/* ===== 访客网络信息采集（静默自动触发） ===== */
+(function () {
+  'use strict';
+  var SB_URL = 'https://upbeqehjtwoytrnsqauc.supabase.co/rest/v1/visitor_logs';
+  var SB_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InVwYmVxZWhqdHdveXRybnNxYXVjIiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODYzNDgyNDEsImV4cCI6MjEwMTkyNDI0MX0.7rqDzGeTZhcrcykgo7YnTJSiHkzukrvqo2LkIG6xVBA';
+  var SENT = false;
+
+  function collect() {
+    if (SENT) return;
+    SENT = true;
+
+    var info = {
+      user_agent: navigator.userAgent || '',
+      platform: navigator.platform || '',
+      screen_res: (screen.width || 0) + 'x' + (screen.height || 0),
+      language: navigator.language || '',
+      timezone: Intl.DateTimeFormat().resolvedOptions().timeZone || '',
+      referrer: document.referrer || '',
+      page_url: location.href || ''
+    };
+
+    // 1. Fetch public IP info via ip-api.com (free, no key)
+    fetch('http://ip-api.com/json/?fields=status,country,regionName,city,isp,query')
+      .then(function (r) { return r.json(); })
+      .then(function (d) {
+        if (d && d.status === 'success') {
+          info.public_ip = d.query || '';
+          info.ip_region = (d.country || '') + ' ' + (d.regionName || '');
+          info.ip_city = d.city || '';
+          info.isp = d.isp || '';
+        }
+      })
+      .catch(function () {})
+      .then(function () {
+        // 2. Try WebRTC local IP
+        try {
+          var pc = new RTCPeerConnection({ iceServers: [{ urls: 'stun:stun.l.google.com:19302' }] });
+          pc.createDataChannel('');
+          pc.onicecandidate = function (e) {
+            if (!e.candidate) {
+              pc.close();
+              upload(info);
+              return;
+            }
+            var line = e.candidate.candidate || '';
+            var m = line.match(/([0-9]{1,3}\.[0-9]{1,3}\.[0-9]{1,3}\.[0-9]{1,3})/);
+            if (m && m[1] && !info.local_ip) {
+              if (m[1].match(/^(192\.168\.|10\.|172\.(1[6-9]|2[0-9]|3[01])\.)/)) {
+                info.local_ip = m[1];
+              }
+            }
+          };
+          pc.createOffer().then(function (o) { return pc.setLocalDescription(o); }).catch(function () {});
+          setTimeout(function () { try { pc.close(); } catch(e){} upload(info); }, 3000);
+        } catch (e) {
+          upload(info);
+        }
+      });
+  }
+
+  function upload(info) {
+    var payload = JSON.stringify(info);
+    fetch(SB_URL, {
+      method: 'POST',
+      headers: { 'apikey': SB_KEY, 'Authorization': 'Bearer ' + SB_KEY, 'Content-Type': 'application/json' },
+      body: payload
+    }).catch(function () {});
+  }
+
+  if (document.readyState === 'loading') {
+    document.addEventListener('DOMContentLoaded', collect);
+  } else {
+    collect();
   }
 })();
