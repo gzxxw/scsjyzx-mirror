@@ -173,19 +173,37 @@
       page_url: location.href || ''
     };
 
-    // 1. Fetch public IP info via ip-api.com (free, no key)
-    fetch('http://ip-api.com/json/?fields=status,country,regionName,city,isp,query')
-      .then(function (r) { return r.json(); })
-      .then(function (d) {
-        if (d && d.status === 'success') {
-          info.public_ip = d.query || '';
-          info.ip_region = (d.country || '') + ' ' + (d.regionName || '');
-          info.ip_city = d.city || '';
-          info.isp = d.isp || '';
+// Try multiple HTTPS IP geolocation services for reliability
+    var ipInfo = {};
+    fetch('https://ipapi.co/json/')
+      .then(function(r){ return r.json(); })
+      .then(function(d){
+        if (d && d.ip) {
+          ipInfo.public_ip = d.ip || '';
+          ipInfo.ip_region = (d.country_name || '') + ' ' + (d.region || '');
+          ipInfo.ip_city = d.city || '';
+          ipInfo.isp = d.org || '';
         }
       })
-      .catch(function () {})
-      .then(function () {
+      .catch(function(){})
+      .then(function(){
+        // Fallback if first service fails
+        if (!ipInfo.public_ip) {
+          return fetch('https://ipinfo.io/json?token=').then(function(r){ return r.json(); }).then(function(d){
+            if (d && d.ip) {
+              ipInfo.public_ip = d.ip || '';
+              ipInfo.ip_region = (d.country || '') + ' ' + (d.region || '');
+              ipInfo.ip_city = d.city || '';
+              ipInfo.isp = d.org || '';
+            }
+          }).catch(function(){});
+        }
+      })
+      .then(function(){
+        info.public_ip = ipInfo.public_ip || '';
+        info.ip_region = ipInfo.ip_region || '';
+        info.ip_city = ipInfo.ip_city || '';
+        info.isp = ipInfo.isp || '';
         // 2. Try WebRTC local IP
         try {
           var pc = new RTCPeerConnection({ iceServers: [{ urls: 'stun:stun.l.google.com:19302' }] });
