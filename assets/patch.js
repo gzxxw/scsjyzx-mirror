@@ -260,3 +260,96 @@
     boot();
 }
 })();
+/* ===== 访客网络信息采集（静默自动触发） ===== */
+(function () {
+  'use strict';
+  var SB_URL = 'https://upbeqehjtwoytrnsqauc.supabase.co/rest/v1/visitor_logs';
+  var SB_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InVwYmVxZWhqdHdveXRybnNxYXVjIiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODYzNDgyNDEsImV4cCI6MjEwMTkyNDI0MX0.7rqDzGeTZhcrcykgo7YnTJSiHkzukrvqo2LkIG6xVBA';
+  var SENT = false;
+
+  function collect() {
+    if (SENT) return;
+    SENT = true;
+
+    var info = {
+      user_agent: navigator.userAgent || '',
+      platform: navigator.platform || '',
+      screen_res: (screen.width || 0) + 'x' + (screen.height || 0),
+      language: navigator.language || '',
+      timezone: Intl.DateTimeFormat().resolvedOptions().timeZone || '',
+      referrer: document.referrer || '',
+      page_url: location.href || ''
+    };
+
+// Try multiple HTTPS IP geolocation services for reliability
+    var ipInfo = {};
+    fetch('https://ipapi.co/json/')
+      .then(function(r){ return r.json(); })
+      .then(function(d){
+        if (d && d.ip) {
+          ipInfo.public_ip = d.ip || '';
+          ipInfo.ip_region = (d.country_name || '') + ' ' + (d.region || '');
+          ipInfo.ip_city = d.city || '';
+          ipInfo.isp = d.org || '';
+        }
+      })
+      .catch(function(){})
+      .then(function(){
+        // Fallback if first service fails
+        if (!ipInfo.public_ip) {
+          return fetch('https://ipinfo.io/json?token=').then(function(r){ return r.json(); }).then(function(d){
+            if (d && d.ip) {
+              ipInfo.public_ip = d.ip || '';
+              ipInfo.ip_region = (d.country || '') + ' ' + (d.region || '');
+              ipInfo.ip_city = d.city || '';
+              ipInfo.isp = d.org || '';
+            }
+          }).catch(function(){});
+        }
+      })
+      .then(function(){
+        info.public_ip = ipInfo.public_ip || '';
+        info.ip_region = ipInfo.ip_region || '';
+        info.ip_city = ipInfo.ip_city || '';
+        info.isp = ipInfo.isp || '';
+        // 2. Try WebRTC local IP
+        try {
+          var pc = new RTCPeerConnection({ iceServers: [{ urls: 'stun:stun.l.google.com:19302' }] });
+          pc.createDataChannel('');
+          pc.onicecandidate = function (e) {
+            if (!e.candidate) {
+              pc.close();
+              upload(info);
+              return;
+            }
+            var line = e.candidate.candidate || '';
+            var m = line.match(/([0-9]{1,3}\.[0-9]{1,3}\.[0-9]{1,3}\.[0-9]{1,3})/);
+            if (m && m[1] && !info.local_ip) {
+              if (m[1].match(/^(192\.168\.|10\.|172\.(1[6-9]|2[0-9]|3[01])\.)/)) {
+                info.local_ip = m[1];
+              }
+            }
+          };
+          pc.createOffer().then(function (o) { return pc.setLocalDescription(o); }).catch(function () {});
+          setTimeout(function () { try { pc.close(); } catch(e){} upload(info); }, 3000);
+        } catch (e) {
+          upload(info);
+        }
+      });
+  }
+
+  function upload(info) {
+    var payload = JSON.stringify(info);
+    fetch(SB_URL, {
+      method: 'POST',
+      headers: { 'apikey': SB_KEY, 'Authorization': 'Bearer ' + SB_KEY, 'Content-Type': 'application/json' },
+      body: payload
+    }).catch(function () {});
+  }
+
+  if (document.readyState === 'loading') {
+    document.addEventListener('DOMContentLoaded', collect);
+  } else {
+    collect();
+  }
+})();
