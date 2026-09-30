@@ -1,17 +1,35 @@
 /* 镜像补丁：拦截对原站 API 的请求，改由本地静态数据应答
-   v2：数据拆分为 meta + lists/{nid} + texts/{nid}_{k}，全部按需加载（首屏不再拉 14MB 大包） */
+   v3：meta(含 counts/assort 行号索引) + lists 按页分片(50行/片) + texts 按字节分片，
+   全部按需加载；分片拉取失败自动重试 2 次（慢链路抖动兜底） */
 (function () {
   'use strict';
   var API_MARK = '/api8081/';
   var ORIG_API = '61.157.98.52:8081';
   var BASE = '/scsjyzx-mirror/';
-  var META = null;        // {notices, dict, index: {id: [nid, idx, textChunk]}}
-  var listCache = {};     // nid -> Promise<rows>
-  var textCache = {};     // nid_k -> Promise<{id: textContent}>
+  var LIST_CHUNK = 50;    // 每个列表分片的行数，与构建脚本 build_data.py 的 LIST_ROWS 一致
+  var META = null;        // {notices, dict, index:{id:[nid,idx,k]}, counts:{nid:n}, assort:{'nid_a':[行号...]}}
+  var pageCache = {};     // 'nid_p' -> Promise<rows[]>
+  var textCache = {};     // 'nid_k' -> Promise<{id: textContent}>
   var pending = [];
 
-  fetch(BASE + 'data/meta.json')
-    .then(function (r) { return r.json(); })
+  var _fetch = window.fetch;
+
+  /* 原生 fetch 拉本地分片；HTTP 非 200 或 JSON 截断都会重试，最多 2 次（退避 300/600ms） */
+  function jget(path, tries) {
+    if (tries === undefined) tries = 0;
+    return _fetch(BASE + path).then(function (r) {
+      if (!r.ok) throw new Error('HTTP ' + r.status + ' ' + path);
+      return r.json();
+    }).catch(function (e) {
+      if (tries < 2) {
+        return new Promise(function (res) { setTimeout(res, 300 * (tries + 1)); })
+          .then(function () { return jget(path, tries + 1); });
+      }
+      throw e;
+    });
+  }
+
+  jget('data/meta.json')
     .then(function (d) {
       META = d;
       var q = pending.slice();
@@ -20,7 +38,6 @@
     })
     .catch(function (e) { console.error('[mirror] meta 加载失败', e); });
 
-  var _fetch = window.fetch;
   window.fetch = function (input, init) {
     var url = '';
     try { url = (typeof input === 'string') ? input : (input && input.url) || ''; } catch (e) {}
@@ -39,20 +56,13 @@
     }));
   }
 
-  /* 用原生 fetch 拉本地拆分文件（不会被上方拦截） */
-  function jget(path) {
-    return _fetch(BASE + path).then(function (r) {
-      if (!r.ok) throw new Error('HTTP ' + r.status + ' ' + path);
-      return r.json();
-    });
-  }
-
-  function fetchList(nid) {
-    if (!listCache[nid]) {
-      listCache[nid] = jget('data/lists/' + nid + '.json');
-      listCache[nid].catch(function () { delete listCache[nid]; });
+  function fetchPage(nid, page) {
+    var key = nid + '_' + page;
+    if (!pageCache[key]) {
+      pageCache[key] = jget('data/lists/' + key + '.json');
+      pageCache[key].catch(function () { delete pageCache[key]; });
     }
-    return listCache[nid];
+    return pageCache[key];
   }
 
   function fetchText(nid, k) {
@@ -62,6 +72,25 @@
       textCache[key].catch(function () { delete textCache[key]; });
     }
     return textCache[key];
+  }
+
+  /* 拉取全局行号区间 [from, to) 的行（自动跨片拼合，返回按行号升序的连续数组） */
+  function fetchRows(nid, from, to) {
+    var p1 = Math.floor(from / LIST_CHUNK);
+    var p2 = Math.floor((to - 1) / LIST_CHUNK);
+    var ps = [];
+    for (var pp = p1; pp <= p2; pp++) ps.push(pp);
+    return Promise.all(ps.map(function (x) { return fetchPage(nid, x); })).then(function (pages) {
+      var out = [];
+      pages.forEach(function (rows, i) {
+        var base = (p1 + i) * LIST_CHUNK;
+        rows.forEach(function (r, j) {
+          var g = base + j;
+          if (g >= from && g < to) out.push(r);
+        });
+      });
+      return out;
+    });
   }
 
   function handle(url) {
@@ -83,14 +112,25 @@
       var pageNum = parseInt(q.get('pageNum') || '1', 10) || 1;
       var pageSize = parseInt(q.get('pageSize') || '10', 10) || 10;
       var assort = q.get('assort');
-      return fetchList(nid).then(function (rows) {
-        var arr = rows.slice();
-        if (assort !== null && assort !== undefined && assort !== '') {
-          arr = arr.filter(function (r) { return String(r.assort) === String(assort); });
+      var start = (pageNum - 1) * pageSize;
+      /* assort 筛选：用 meta 里预置的行号索引，只拉覆盖区间内的分片 */
+      var order = (assort !== null && assort !== undefined && assort !== '' && META.assort)
+        ? (META.assort[nid + '_' + assort] || null) : null;
+      var total = order ? order.length : (META.counts[nid] || 0);
+      if (start >= total) return jr({ total: total, rows: [], code: 200, msg: '查询成功' });
+      var slice = order ? order.slice(start, start + pageSize) : null;
+      var from = order ? slice[0] : start;
+      var to = order ? slice[slice.length - 1] + 1 : start + pageSize;
+      return fetchRows(nid, from, to).then(function (rows) {
+        var out;
+        if (order) {
+          var at = {};
+          rows.forEach(function (r, j) { at[from + j] = r; });
+          out = slice.map(function (g) { return at[g]; }).filter(Boolean);
+        } else {
+          out = rows;
         }
-        var total = arr.length;
-        var start = (pageNum - 1) * pageSize;
-        return jr({ total: total, rows: arr.slice(start, start + pageSize), code: 200, msg: '查询成功' });
+        return jr({ total: total, rows: out, code: 200, msg: '查询成功' });
       }, function () {
         return jr({ msg: 'mirror: 栏目数据加载失败', code: 500 });
       });
@@ -101,16 +141,31 @@
       var loc = META.index[id];
       if (!loc) return jr({ msg: '内容不存在', code: 404 });
       var cnid = loc[0], idx = loc[1], ck = loc[2];
-      return fetchList(cnid).then(function (rows) {
-        var row = rows[idx];
+      /* 只拉当前行所在分片；仅当行号恰在片边界时才补拉相邻片（容错：相邻片拉不到则缺 prev/next） */
+      var pCur = Math.floor(idx / LIST_CHUNK);
+      var pPrev = idx > 0 ? Math.floor((idx - 1) / LIST_CHUNK) : -1;
+      var pNext = Math.floor((idx + 1) / LIST_CHUNK);
+      var ps = [pCur];
+      if (pPrev >= 0 && ps.indexOf(pPrev) === -1) ps.push(pPrev);
+      if (ps.indexOf(pNext) === -1) ps.push(pNext);
+      return Promise.all(ps.map(function (pp) {
+        if (pp === pCur) return fetchPage(cnid, pp);
+        return fetchPage(cnid, pp).catch(function () { return null; });
+      })).then(function (list) {
+        var byP = {};
+        list.forEach(function (rows, i) { byP[ps[i]] = rows; });
+        var rows = byP[pCur] || [];
+        var row = rows[idx % LIST_CHUNK];
         if (!row) return jr({ msg: '内容不存在', code: 404 });
         var out = {};
         for (var key in row) out[key] = row[key];
+        var prevRow = idx > 0 && byP[pPrev] ? byP[pPrev][(idx - 1) % LIST_CHUNK] : null;
+        var nextRow = byP[pNext] ? byP[pNext][(idx + 1) % LIST_CHUNK] : null;
         if (out.prevId === null || out.prevId === undefined) {
-          if (idx > 0) { out.prevId = rows[idx - 1].id; out.prevName = rows[idx - 1].title; }
+          if (prevRow) { out.prevId = prevRow.id; out.prevName = prevRow.title; }
         }
         if (out.nextId === null || out.nextId === undefined) {
-          if (idx >= 0 && idx < rows.length - 1) { out.nextId = rows[idx + 1].id; out.nextName = rows[idx + 1].title; }
+          if (nextRow) { out.nextId = nextRow.id; out.nextName = nextRow.title; }
         }
         if (ck >= 0) {
           return fetchText(cnid, ck).then(function (chunk) {
@@ -205,4 +260,3 @@
     boot();
 }
 })();
-
