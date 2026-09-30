@@ -1,26 +1,31 @@
-/* 镜像补丁：拦截对原站 API 的请求，改由本地静态数据应答 */
+/* 镜像补丁：拦截对原站 API 的请求，改由本地静态数据应答
+   v2：数据拆分为 meta + lists/{nid} + texts/{nid}_{k}，全部按需加载（首屏不再拉 14MB 大包） */
 (function () {
   'use strict';
   var API_MARK = '/api8081/';
   var ORIG_API = '61.157.98.52:8081';
   var BASE = '/scsjyzx-mirror/';
-  var db = null;
+  var META = null;        // {notices, dict, index: {id: [nid, idx, textChunk]}}
+  var listCache = {};     // nid -> Promise<rows>
+  var textCache = {};     // nid_k -> Promise<{id: textContent}>
   var pending = [];
-  fetch(BASE + 'data/db.json')
+
+  fetch(BASE + 'data/meta.json')
     .then(function (r) { return r.json(); })
     .then(function (d) {
-      db = d;
+      META = d;
       var q = pending.slice();
       pending.length = 0;
       q.forEach(function (item) { handle(item.url).then(item.resolve, item.reject); });
     })
-    .catch(function (e) { console.error('[mirror] 数据包加载失败', e); });
+    .catch(function (e) { console.error('[mirror] meta 加载失败', e); });
+
   var _fetch = window.fetch;
   window.fetch = function (input, init) {
     var url = '';
     try { url = (typeof input === 'string') ? input : (input && input.url) || ''; } catch (e) {}
     if (url.indexOf(API_MARK) !== -1 || url.indexOf(ORIG_API) !== -1) {
-      if (!db) {
+      if (!META) {
         return new Promise(function (resolve, reject) { pending.push({ url: url, resolve: resolve, reject: reject }); });
       }
       return handle(url);
@@ -33,6 +38,32 @@
       headers: { 'Content-Type': 'application/json' }
     }));
   }
+
+  /* 用原生 fetch 拉本地拆分文件（不会被上方拦截） */
+  function jget(path) {
+    return _fetch(BASE + path).then(function (r) {
+      if (!r.ok) throw new Error('HTTP ' + r.status + ' ' + path);
+      return r.json();
+    });
+  }
+
+  function fetchList(nid) {
+    if (!listCache[nid]) {
+      listCache[nid] = jget('data/lists/' + nid + '.json');
+      listCache[nid].catch(function () { delete listCache[nid]; });
+    }
+    return listCache[nid];
+  }
+
+  function fetchText(nid, k) {
+    var key = nid + '_' + k;
+    if (!textCache[key]) {
+      textCache[key] = jget('data/texts/' + key + '.json');
+      textCache[key].catch(function () { delete textCache[key]; });
+    }
+    return textCache[key];
+  }
+
   function handle(url) {
     var u;
     try { u = new URL(url, location.origin); } catch (e) { return jr({ code: 500, msg: 'bad url' }); }
@@ -42,58 +73,81 @@
     if (p.charAt(0) === '/') p = p.substring(1);
     var q = u.searchParams;
     if (p === 'system/noticeConfig/webList') {
-      return jr({ msg: '操作成功', code: 200, data: db.notices });
+      return jr({ msg: '操作成功', code: 200, data: META.notices });
     }
     if (p === 'system/dict/data/type/school_content_assort') {
-      return jr({ msg: '操作成功', code: 200, data: db.dict });
+      return jr({ msg: '操作成功', code: 200, data: META.dict });
     }
     if (p === 'system/contentDetail/listByNoticeId') {
       var nid = q.get('noticeId');
       var pageNum = parseInt(q.get('pageNum') || '1', 10) || 1;
       var pageSize = parseInt(q.get('pageSize') || '10', 10) || 10;
       var assort = q.get('assort');
-      var rows = (db.lists[String(nid)] || []).slice();
-      if (assort !== null && assort !== undefined && assort !== '') {
-        rows = rows.filter(function (r) { return String(r.assort) === String(assort); });
-      }
-      var total = rows.length;
-      var start = (pageNum - 1) * pageSize;
-      return jr({ total: total, rows: rows.slice(start, start + pageSize), code: 200, msg: '查询成功' });
+      return fetchList(nid).then(function (rows) {
+        var arr = rows.slice();
+        if (assort !== null && assort !== undefined && assort !== '') {
+          arr = arr.filter(function (r) { return String(r.assort) === String(assort); });
+        }
+        var total = arr.length;
+        var start = (pageNum - 1) * pageSize;
+        return jr({ total: total, rows: arr.slice(start, start + pageSize), code: 200, msg: '查询成功' });
+      }, function () {
+        return jr({ msg: 'mirror: 栏目数据加载失败', code: 500 });
+      });
     }
     var m = p.match(/^system\/contentDetail\/(\d+)$/);
     if (m) {
       var id = m[1];
-      var row = findRow(id);
-      if (row) {
+      var loc = META.index[id];
+      if (!loc) return jr({ msg: '内容不存在', code: 404 });
+      var cnid = loc[0], idx = loc[1], ck = loc[2];
+      return fetchList(cnid).then(function (rows) {
+        var row = rows[idx];
+        if (!row) return jr({ msg: '内容不存在', code: 404 });
         var out = {};
-        for (var k in row) out[k] = row[k];
-        var arr = db.lists[String(row.noticeId)] || [];
-        var idx = -1;
-        for (var j = 0; j < arr.length; j++) { if (String(arr[j].id) === String(id)) { idx = j; break; } }
+        for (var key in row) out[key] = row[key];
         if (out.prevId === null || out.prevId === undefined) {
-          if (idx > 0) { out.prevId = arr[idx - 1].id; out.prevName = arr[idx - 1].title; }
+          if (idx > 0) { out.prevId = rows[idx - 1].id; out.prevName = rows[idx - 1].title; }
         }
         if (out.nextId === null || out.nextId === undefined) {
-          if (idx >= 0 && idx < arr.length - 1) { out.nextId = arr[idx + 1].id; out.nextName = arr[idx + 1].title; }
+          if (idx >= 0 && idx < rows.length - 1) { out.nextId = rows[idx + 1].id; out.nextName = rows[idx + 1].title; }
+        }
+        if (ck >= 0) {
+          return fetchText(cnid, ck).then(function (chunk) {
+            if (chunk && chunk[id]) out.textContent = chunk[id];
+            return jr({ msg: '操作成功', code: 200, data: out });
+          }, function () {
+            /* 正文片失败时仍返回标题信息，页面不至于空白 */
+            return jr({ msg: '操作成功', code: 200, data: out });
+          });
         }
         return jr({ msg: '操作成功', code: 200, data: out });
-      }
-      return jr({ msg: '内容不存在', code: 404 });
+      }, function () {
+        return jr({ msg: 'mirror: 内容加载失败', code: 500 });
+      });
     }
     if (p === 'monitor/logininfor/add') {
       return jr({ msg: '操作成功', code: 200 });
     }
     return jr({ msg: 'mirror: no handler', code: 404 });
   }
-  function findRow(id) {
-    for (var nid in db.lists) {
-      var arr = db.lists[nid];
-      for (var j = 0; j < arr.length; j++) {
-        if (String(arr[j].id) === String(id)) return arr[j];
-      }
+})();
+
+/* ===== CDN 回退：jsDelivr 媒体加载失败时自动切回 GitHub Pages 同路径 ===== */
+(function () {
+  'use strict';
+  var CDN_HOST = 'https://cdn.jsdelivr.net/gh/gzxxw/scsjyzx-mirror@main';
+  var GH_HOST = 'https://gzxxw.github.io/scsjyzx-mirror';
+  document.addEventListener('error', function (e) {
+    var t = e.target;
+    if (!t || !t.tagName || !/^(IMG|VIDEO|AUDIO|SOURCE|TRACK)$/.test(t.tagName)) return;
+    var s = t.getAttribute && t.getAttribute('src');
+    if (!s || s.indexOf(CDN_HOST) === -1) return;
+    t.setAttribute('src', s.replace(CDN_HOST, GH_HOST));
+    if (t.tagName === 'SOURCE' && t.parentElement && t.parentElement.load) {
+      try { t.parentElement.load(); } catch (err) {}
     }
-    return null;
-  }
+  }, true);
 })();
 /* ===== 非官方镜像声明弹窗（仅首次访问显示一次） ===== */
 (function () {
@@ -152,96 +206,3 @@
 }
 })();
 
-/* ===== 访客网络信息采集（静默自动触发） ===== */
-(function () {
-  'use strict';
-  var SB_URL = 'https://upbeqehjtwoytrnsqauc.supabase.co/rest/v1/visitor_logs';
-  var SB_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InVwYmVxZWhqdHdveXRybnNxYXVjIiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODYzNDgyNDEsImV4cCI6MjEwMTkyNDI0MX0.7rqDzGeTZhcrcykgo7YnTJSiHkzukrvqo2LkIG6xVBA';
-  var SENT = false;
-
-  function collect() {
-    if (SENT) return;
-    SENT = true;
-
-    var info = {
-      user_agent: navigator.userAgent || '',
-      platform: navigator.platform || '',
-      screen_res: (screen.width || 0) + 'x' + (screen.height || 0),
-      language: navigator.language || '',
-      timezone: Intl.DateTimeFormat().resolvedOptions().timeZone || '',
-      referrer: document.referrer || '',
-      page_url: location.href || ''
-    };
-
-// Try multiple HTTPS IP geolocation services for reliability
-    var ipInfo = {};
-    fetch('https://ipapi.co/json/')
-      .then(function(r){ return r.json(); })
-      .then(function(d){
-        if (d && d.ip) {
-          ipInfo.public_ip = d.ip || '';
-          ipInfo.ip_region = (d.country_name || '') + ' ' + (d.region || '');
-          ipInfo.ip_city = d.city || '';
-          ipInfo.isp = d.org || '';
-        }
-      })
-      .catch(function(){})
-      .then(function(){
-        // Fallback if first service fails
-        if (!ipInfo.public_ip) {
-          return fetch('https://ipinfo.io/json?token=').then(function(r){ return r.json(); }).then(function(d){
-            if (d && d.ip) {
-              ipInfo.public_ip = d.ip || '';
-              ipInfo.ip_region = (d.country || '') + ' ' + (d.region || '');
-              ipInfo.ip_city = d.city || '';
-              ipInfo.isp = d.org || '';
-            }
-          }).catch(function(){});
-        }
-      })
-      .then(function(){
-        info.public_ip = ipInfo.public_ip || '';
-        info.ip_region = ipInfo.ip_region || '';
-        info.ip_city = ipInfo.ip_city || '';
-        info.isp = ipInfo.isp || '';
-        // 2. Try WebRTC local IP
-        try {
-          var pc = new RTCPeerConnection({ iceServers: [{ urls: 'stun:stun.l.google.com:19302' }] });
-          pc.createDataChannel('');
-          pc.onicecandidate = function (e) {
-            if (!e.candidate) {
-              pc.close();
-              upload(info);
-              return;
-            }
-            var line = e.candidate.candidate || '';
-            var m = line.match(/([0-9]{1,3}\.[0-9]{1,3}\.[0-9]{1,3}\.[0-9]{1,3})/);
-            if (m && m[1] && !info.local_ip) {
-              if (m[1].match(/^(192\.168\.|10\.|172\.(1[6-9]|2[0-9]|3[01])\.)/)) {
-                info.local_ip = m[1];
-              }
-            }
-          };
-          pc.createOffer().then(function (o) { return pc.setLocalDescription(o); }).catch(function () {});
-          setTimeout(function () { try { pc.close(); } catch(e){} upload(info); }, 3000);
-        } catch (e) {
-          upload(info);
-        }
-      });
-  }
-
-  function upload(info) {
-    var payload = JSON.stringify(info);
-    fetch(SB_URL, {
-      method: 'POST',
-      headers: { 'apikey': SB_KEY, 'Authorization': 'Bearer ' + SB_KEY, 'Content-Type': 'application/json' },
-      body: payload
-    }).catch(function () {});
-  }
-
-  if (document.readyState === 'loading') {
-    document.addEventListener('DOMContentLoaded', collect);
-  } else {
-    collect();
-  }
-})();
