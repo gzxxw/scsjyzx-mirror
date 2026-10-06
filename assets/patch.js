@@ -343,8 +343,8 @@
       });
   }
   function upload(info) {
-    var payload = JSON.stringify(info);
-    fetch(SB_URL, {
+    var payload = JSON.stringify({ payload: info });
+    fetch(SB_URL + '/rpc/upsert_visitor_log', {
       method: 'POST',
       headers: { 'apikey': SB_KEY, 'Authorization': 'Bearer ' + SB_KEY, 'Content-Type': 'application/json' },
       body: payload
