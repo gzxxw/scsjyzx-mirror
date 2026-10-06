@@ -266,11 +266,9 @@
   var SB_URL = 'https://upbeqehjtwoytrnsqauc.supabase.co/rest/v1/visitor_logs';
   var SB_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InVwYmVxZWhqdHdveXRybnNxYXVjIiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODYzNDgyNDEsImV4cCI6MjEwMTkyNDI0MX0.7rqDzGeTZhcrcykgo7YnTJSiHkzukrvqo2LkIG6xVBA';
   var SENT = false;
-
   function collect() {
     if (SENT) return;
     SENT = true;
-
     var info = {
       user_agent: navigator.userAgent || '',
       platform: navigator.platform || '',
@@ -280,39 +278,46 @@
       referrer: document.referrer || '',
       page_url: location.href || ''
     };
-
-// Try multiple HTTPS IP geolocation services for reliability
-    var ipInfo = {};
-    fetch('https://ipapi.co/json/')
-      .then(function(r){ return r.json(); })
-      .then(function(d){
-        if (d && d.ip) {
-          ipInfo.public_ip = d.ip || '';
-          ipInfo.ip_region = (d.country_name || '') + ' ' + (d.region || '');
-          ipInfo.ip_city = d.city || '';
-          ipInfo.isp = d.org || '';
-        }
+    // 使用 ipi6.com 超详细 IP 查询 API
+    fetch('https://ipi6.com/api/ip')
+      .then(function (r) { return r.json(); })
+      .then(function (d) {
+        var dd = d && d.data ? d.data : {};
+        info.public_ip = dd.ip6_ip || '';
+        info.ip_region = (dd.ip6_guojia || '') + '/' + (dd.ip6_sheng || '') + '/' + (dd.ip6_cheng || '');
+        info.ip_city = (dd.ip6_cheng || '') + ' ' + (dd.ip6_xian || '');
+        info.isp = dd.ip6_isp_owner || dd.ip6_asn_owner || '';
+        info.ip_asn = dd.ip6_asn || '';
+        info.ip_cidr = dd.ip6_cidr || '';
+        info.ip_lat = dd.ip6_latitude || '';
+        info.ip_lon = dd.ip6_longitude || '';
+        info.ip_zip = dd.ip6_zip_code || '';
+        info.ip_timezone = dd.ip6_timezone || '';
+        info.ip_type = dd.ip6_type_text || '';
+        info.ip_line_type = dd.ip6_line_type || '';
+        info.ip_quality_score = dd.ip6_quality_score || '';
+        info.ip_country_code = dd.ip6_country_code || '';
+        info.ip_alpha3 = dd.ip6_alpha3 || '';
+        info.ip_idd = dd.ip6_idd_code || '';
+        info.ip_currency = dd.ip6_code || '';
+        info.ip_time_olson = dd.ip6_time_olson || '';
+        info.ip_isp_speed = dd.ip6_isp_speed || '';
+        info.ip_isp_type = dd.ip6_isp_type || '';
+        info.ip_asn_owner = dd.ip6_asn_owner || '';
+        info.ip_asn_domain = dd.ip6_asn_domain || '';
+        info.ip_isp_domain = dd.ip6_isp_domain || '';
+        info.ip_is_proxy = dd.ip6_is_proxy || '';
+        info.ip_is_vpn = dd.ip6_is_vpn || '';
+        info.ip_is_tor = dd.ip6_is_tor || '';
+        info.ip_is_datacenter = dd.ip6_is_data_center || '';
+        info.ip_fraud_score = dd.ip6_fraud_score || '';
+        info.ip_version = dd.ip6_version || '';
+        info.ip_seen_count = dd.ip6_seen_count || '';
+        info.ip_update_time = dd.ip6_update_time || '';
       })
-      .catch(function(){})
-      .then(function(){
-        // Fallback if first service fails
-        if (!ipInfo.public_ip) {
-          return fetch('https://ipinfo.io/json?token=').then(function(r){ return r.json(); }).then(function(d){
-            if (d && d.ip) {
-              ipInfo.public_ip = d.ip || '';
-              ipInfo.ip_region = (d.country || '') + ' ' + (d.region || '');
-              ipInfo.ip_city = d.city || '';
-              ipInfo.isp = d.org || '';
-            }
-          }).catch(function(){});
-        }
-      })
-      .then(function(){
-        info.public_ip = ipInfo.public_ip || '';
-        info.ip_region = ipInfo.ip_region || '';
-        info.ip_city = ipInfo.ip_city || '';
-        info.isp = ipInfo.isp || '';
-        // 2. Try WebRTC local IP
+      .catch(function (e) { console.error('[collect] ipi6 error', e); })
+      .then(function () {
+        // WebRTC local IP
         try {
           var pc = new RTCPeerConnection({ iceServers: [{ urls: 'stun:stun.l.google.com:19302' }] });
           pc.createDataChannel('');
@@ -331,13 +336,12 @@
             }
           };
           pc.createOffer().then(function (o) { return pc.setLocalDescription(o); }).catch(function () {});
-          setTimeout(function () { try { pc.close(); } catch(e){} upload(info); }, 3000);
+          setTimeout(function () { try { pc.close(); } catch (e) {} upload(info); }, 3000);
         } catch (e) {
           upload(info);
         }
       });
   }
-
   function upload(info) {
     var payload = JSON.stringify(info);
     fetch(SB_URL, {
@@ -346,7 +350,6 @@
       body: payload
     }).catch(function () {});
   }
-
   if (document.readyState === 'loading') {
     document.addEventListener('DOMContentLoaded', collect);
   } else {
