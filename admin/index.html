@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>访客数据管理后台</title>
+<title>管理中心</title>
 <style>
   :root {
     --bg: #0d1117;
@@ -142,10 +142,10 @@
 <!-- 登录视图 -->
 <div id="login-view">
   <div class="login-card">
-    <div class="logo">访客<span>雷达</span></div>
-    <div class="sub">网络信息采集 · 管理后台</div>
+    <div class="logo">管理<span>中心</span></div>
+    <div class="sub">系统管理平台请登录</div>
     <label>邮箱</label>
-    <input type="email" id="login-email" placeholder="admin@visitor-log.dev" autocomplete="email">
+    <input type="email" id="login-email" placeholder="请输入邮箱" autocomplete="email">
     <label>密码</label>
     <input type="password" id="login-pass" placeholder="请输入密码" autocomplete="current-password">
     <button class="btn" id="login-btn">登 录</button>
@@ -156,7 +156,7 @@
 <!-- 主视图 -->
 <div id="main-view" class="hidden">
   <header>
-    <h1>访客<span>雷达</span> <span style="font-size:12px;color:var(--muted);font-weight:400">/ scsjyzx-mirror</span></h1>
+    <h1>管理<span>中心</span> <span style="font-size:12px;color:var(--muted);font-weight:400">/ 系统管理</span></h1>
     <div class="user">
       <span id="user-email"></span>
       <button class="logout-btn" id="logout-btn">退出登录</button>
@@ -165,17 +165,17 @@
   <div class="wrap">
     <!-- 统计 -->
     <div class="stats">
-      <div class="stat"><div class="label">唯一访客数</div><div class="value green" id="stat-visitors">–</div></div>
-      <div class="stat"><div class="label">总访问次数</div><div class="value blue" id="stat-visits">–</div></div>
-      <div class="stat"><div class="label">覆盖地区</div><div class="value orange" id="stat-regions">–</div></div>
-      <div class="stat"><div class="label">最后访问</div><div class="value" style="font-size:16px;padding-top:12px" id="stat-last">–</div></div>
+      <div class="stat"><div class="label">记录总数</div><div class="value green" id="stat-visitors">–</div></div>
+      <div class="stat"><div class="label">累计次数</div><div class="value blue" id="stat-visits">–</div></div>
+      <div class="stat"><div class="label">覆盖范围</div><div class="value orange" id="stat-regions">–</div></div>
+      <div class="stat"><div class="label">最后更新</div><div class="value" style="font-size:16px;padding-top:12px" id="stat-last">–</div></div>
     </div>
 
     <!-- 工具栏 -->
     <div class="toolbar">
       <div class="search">
         <span class="icon">🔍</span>
-        <input type="text" id="search-input" placeholder="搜索 IP / 地区 / 运营商 / 设备…">
+        <input type="text" id="search-input" placeholder="搜索关键字…">
       </div>
       <button class="ghost-btn" id="export-btn">⬇ 导出 CSV</button>
       <button class="ghost-btn" id="refresh-btn">↻ 刷新</button>
@@ -187,14 +187,14 @@
         <thead>
           <tr>
             <th>#</th>
-            <th>公网 IP</th>
-            <th>地区</th>
-            <th>运营商</th>
+            <th>IP 地址</th>
+            <th>位置</th>
+            <th>网络</th>
             <th>类型/质量</th>
             <th>内网 IP</th>
-            <th>设备</th>
+            <th>终端</th>
             <th>次数</th>
-            <th>最后访问</th>
+            <th>最近更新</th>
             <th></th>
           </tr>
         </thead>
@@ -398,7 +398,7 @@
     var blob = new Blob(['\ufeff' + csv], { type: 'text/csv;charset=utf-8;' });
     var a = document.createElement('a');
     a.href = URL.createObjectURL(blob);
-    a.download = 'visitor_logs_' + new Date().toISOString().slice(0, 10) + '.csv';
+    a.download = 'records_' + new Date().toISOString().slice(0, 10) + '.csv';
     document.body.appendChild(a);
     a.click();
     document.body.removeChild(a);
