@@ -1,0 +1,452 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>访客数据管理后台</title>
+<style>
+  :root {
+    --bg: #0d1117;
+    --panel: #161b22;
+    --panel2: #1c2430;
+    --border: #2d3748;
+    --text: #e6edf3;
+    --muted: #8b949e;
+    --accent: #3ecf8e;
+    --accent2: #58a6ff;
+    --danger: #f85149;
+    --radius: 10px;
+  }
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body {
+    font-family: -apple-system, "PingFang SC", "Microsoft YaHei", "Segoe UI", sans-serif;
+    background: var(--bg);
+    color: var(--text);
+    min-height: 100vh;
+  }
+  .hidden { display: none !important; }
+
+  /* ── 登录页 ── */
+  #login-view {
+    min-height: 100vh;
+    display: flex; align-items: center; justify-content: center;
+    background: radial-gradient(1200px 600px at 50% -10%, #1f2937 0%, var(--bg) 60%);
+  }
+  .login-card {
+    width: 360px; max-width: 92vw; background: var(--panel);
+    border: 1px solid var(--border); border-radius: 14px; padding: 34px 30px;
+    box-shadow: 0 20px 60px rgba(0,0,0,.5);
+  }
+  .login-card .logo { font-size: 26px; font-weight: 800; text-align: center; letter-spacing: 1px; }
+  .login-card .logo span { color: var(--accent); }
+  .login-card .sub { text-align: center; color: var(--muted); font-size: 13px; margin: 6px 0 24px; }
+  .login-card label { display: block; font-size: 13px; color: var(--muted); margin: 14px 0 6px; }
+  .login-card input {
+    width: 100%; padding: 11px 14px; border-radius: 8px;
+    background: var(--bg); border: 1px solid var(--border); color: var(--text);
+    font-size: 14px; outline: none;
+  }
+  .login-card input:focus { border-color: var(--accent); }
+  .btn {
+    width: 100%; padding: 12px; border-radius: 8px; border: none; cursor: pointer;
+    background: var(--accent); color: #0a0f0a; font-size: 15px; font-weight: 700;
+    margin-top: 20px; transition: filter .15s;
+  }
+  .btn:hover { filter: brightness(1.1); }
+  .btn:disabled { opacity: .6; cursor: not-allowed; }
+  .err { color: var(--danger); font-size: 13px; margin-top: 12px; min-height: 18px; }
+
+  /* ── 主界面 ── */
+  header {
+    display: flex; align-items: center; justify-content: space-between;
+    padding: 16px 24px; background: var(--panel); border-bottom: 1px solid var(--border);
+    position: sticky; top: 0; z-index: 10;
+  }
+  header h1 { font-size: 18px; font-weight: 700; }
+  header h1 span { color: var(--accent); }
+  header .user { display: flex; align-items: center; gap: 12px; color: var(--muted); font-size: 13px; }
+  .logout-btn {
+    background: transparent; border: 1px solid var(--border); color: var(--muted);
+    padding: 7px 14px; border-radius: 7px; cursor: pointer; font-size: 13px;
+  }
+  .logout-btn:hover { color: var(--danger); border-color: var(--danger); }
+
+  .wrap { max-width: 1200px; margin: 0 auto; padding: 24px; }
+
+  /* 统计卡片 */
+  .stats { display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 16px; margin-bottom: 22px; }
+  .stat {
+    background: var(--panel); border: 1px solid var(--border); border-radius: var(--radius);
+    padding: 18px 20px;
+  }
+  .stat .label { font-size: 12px; color: var(--muted); letter-spacing: 1px; }
+  .stat .value { font-size: 30px; font-weight: 800; margin-top: 6px; }
+  .stat .value.green { color: var(--accent); }
+  .stat .value.blue { color: var(--accent2); }
+  .stat .value.orange { color: #f0a63a; }
+
+  /* 工具栏 */
+  .toolbar { display: flex; flex-wrap: wrap; gap: 12px; align-items: center; margin-bottom: 16px; }
+  .toolbar .search {
+    flex: 1; min-width: 200px; display: flex; align-items: center; gap: 8px;
+    background: var(--panel); border: 1px solid var(--border); border-radius: 8px; padding: 0 14px;
+  }
+  .toolbar .search input {
+    flex: 1; background: transparent; border: none; color: var(--text);
+    padding: 11px 0; font-size: 14px; outline: none;
+  }
+  .toolbar .search .icon { color: var(--muted); }
+  .ghost-btn {
+    background: var(--panel2); color: var(--text); border: 1px solid var(--border);
+    padding: 10px 18px; border-radius: 8px; cursor: pointer; font-size: 14px;
+  }
+  .ghost-btn:hover { border-color: var(--accent); color: var(--accent); }
+
+  /* 表格 */
+  .table-wrap { background: var(--panel); border: 1px solid var(--border); border-radius: var(--radius); overflow: auto; }
+  table { width: 100%; border-collapse: collapse; font-size: 13px; min-width: 900px; }
+  thead th {
+    text-align: left; padding: 12px 14px; color: var(--muted); font-weight: 600;
+    border-bottom: 1px solid var(--border); white-space: nowrap; font-size: 12px; letter-spacing: .5px;
+  }
+  tbody td { padding: 12px 14px; border-bottom: 1px solid #222b36; vertical-align: top; }
+  tbody tr:hover { background: var(--panel2); }
+  tbody tr.row-detail { background: #0a0f14; }
+  tbody tr.row-detail td { padding: 0; }
+  .row-detail pre {
+    font-size: 11px; color: var(--muted); padding: 14px 16px; white-space: pre-wrap;
+    word-break: break-all; max-height: 300px; overflow: auto; font-family: ui-monospace, monospace;
+  }
+  .tag {
+    display: inline-block; padding: 3px 9px; border-radius: 20px; font-size: 11px;
+    background: #1f3d33; color: var(--accent); border: 1px solid #2c5a48;
+  }
+  .tag.blue { background: #1f3a5f; color: var(--accent2); border-color: #2b558c; }
+  .tag.gray { background: #262c36; color: var(--muted); border-color: #37404d; }
+  .ip { font-family: ui-monospace, monospace; color: var(--accent2); }
+  .muted { color: var(--muted); }
+  .empty { text-align: center; color: var(--muted); padding: 40px; }
+  .count-badge { display: inline-flex; align-items: center; justify-content: center; min-width: 22px; height: 22px; border-radius: 11px; background: #2c3a4d; color: var(--accent); font-size: 12px; font-weight: 700; padding: 0 6px; }
+
+  .toast {
+    position: fixed; bottom: 24px; left: 50%; transform: translateX(-50%);
+    background: var(--panel2); border: 1px solid var(--border); padding: 12px 22px;
+    border-radius: 8px; font-size: 14px; z-index: 99; box-shadow: 0 10px 30px rgba(0,0,0,.5);
+    opacity: 0; transition: opacity .3s; pointer-events: none;
+  }
+  .toast.show { opacity: 1; }
+</style>
+</head>
+<body>
+
+<!-- 登录视图 -->
+<div id="login-view">
+  <div class="login-card">
+    <div class="logo">访客<span>雷达</span></div>
+    <div class="sub">网络信息采集 · 管理后台</div>
+    <label>邮箱</label>
+    <input type="email" id="login-email" placeholder="admin@visitor-log.dev" autocomplete="email">
+    <label>密码</label>
+    <input type="password" id="login-pass" placeholder="请输入密码" autocomplete="current-password">
+    <button class="btn" id="login-btn">登 录</button>
+    <div class="err" id="login-err"></div>
+  </div>
+</div>
+
+<!-- 主视图 -->
+<div id="main-view" class="hidden">
+  <header>
+    <h1>访客<span>雷达</span> <span style="font-size:12px;color:var(--muted);font-weight:400">/ scsjyzx-mirror</span></h1>
+    <div class="user">
+      <span id="user-email"></span>
+      <button class="logout-btn" id="logout-btn">退出登录</button>
+    </div>
+  </header>
+  <div class="wrap">
+    <!-- 统计 -->
+    <div class="stats">
+      <div class="stat"><div class="label">唯一访客数</div><div class="value green" id="stat-visitors">–</div></div>
+      <div class="stat"><div class="label">总访问次数</div><div class="value blue" id="stat-visits">–</div></div>
+      <div class="stat"><div class="label">覆盖地区</div><div class="value orange" id="stat-regions">–</div></div>
+      <div class="stat"><div class="label">最后访问</div><div class="value" style="font-size:16px;padding-top:12px" id="stat-last">–</div></div>
+    </div>
+
+    <!-- 工具栏 -->
+    <div class="toolbar">
+      <div class="search">
+        <span class="icon">🔍</span>
+        <input type="text" id="search-input" placeholder="搜索 IP / 地区 / 运营商 / 设备…">
+      </div>
+      <button class="ghost-btn" id="export-btn">⬇ 导出 CSV</button>
+      <button class="ghost-btn" id="refresh-btn">↻ 刷新</button>
+    </div>
+
+    <!-- 表格 -->
+    <div class="table-wrap">
+      <table>
+        <thead>
+          <tr>
+            <th>#</th>
+            <th>公网 IP</th>
+            <th>地区</th>
+            <th>运营商</th>
+            <th>类型/质量</th>
+            <th>内网 IP</th>
+            <th>设备</th>
+            <th>次数</th>
+            <th>最后访问</th>
+            <th></th>
+          </tr>
+        </thead>
+        <tbody id="table-body">
+          <tr><td colspan="10" class="empty">加载中…</td></tr>
+        </tbody>
+      </table>
+    </div>
+  </div>
+</div>
+
+<div class="toast" id="toast"></div>
+
+<script>
+(function () {
+  'use strict';
+  var SB_URL = 'https://upbeqehjtwoytrnsqauc.supabase.co';
+  var SB_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InVwYmVxZWhqdHdveXRybnNxYXVjIiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODYzNDgyNDEsImV4cCI6MjEwMTkyNDI0MX0.7rqDzGeTZhcrcykgo7YnTJSiHkzukrvqo2LkIG6xVBA';
+  var TOKEN_KEY = 'visitor_admin_token';
+
+  var $ = function (id) { return document.getElementById(id); };
+  var allData = [];
+  var token = null;
+
+  function getToken() { try { return localStorage.getItem(TOKEN_KEY); } catch (e) { return null; } }
+
+  function setToken(t) {
+    token = t;
+    try { localStorage.setItem(TOKEN_KEY, t); } catch (e) {}
+  }
+
+  function clearToken() { token = null; try { localStorage.removeItem(TOKEN_KEY); } catch (e) {} }
+
+  function toast(msg) {
+    var el = $('toast');
+    el.textContent = msg;
+    el.classList.add('show');
+    setTimeout(function () { el.classList.remove('show'); }, 2200);
+  }
+
+  function fmtTime(ts) {
+    if (!ts) return '–';
+    var d = new Date(ts);
+    var p = function (n) { return n < 10 ? '0' + n : '' + n; };
+    return d.getFullYear() + '-' + p(d.getMonth() + 1) + '-' + p(d.getDate())
+      + ' ' + p(d.getHours()) + ':' + p(d.getMinutes());
+  }
+
+  function esc(s) {
+    return String(s == null ? '' : s).replace(/[&<>"']/g, function (c) {
+      return { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '"', "'": '&#39;' }[c];
+    });
+  }
+
+  /* ── 登录 ── */
+  async function login(email, password) {
+    var errEl = $('login-err');
+    errEl.textContent = '';
+    try {
+      var res = await fetch(SB_URL + '/auth/v1/token?grant_type=password', {
+        method: 'POST',
+        headers: { 'apikey': SB_KEY, 'Content-Type': 'application/json' },
+        body: JSON.stringify({ email: email, password: password })
+      });
+      var data = await res.json();
+      if (!res.ok || !data.access_token) {
+        errEl.textContent = (data.error_description || data.msg || data.error || '登录失败，请检查账号密码');
+        return;
+      }
+      setToken(data.access_token);
+      $('user-email').textContent = data.user && data.user.email ? data.user.email : email;
+      showMain();
+      toast('登录成功');
+      await loadData();
+    } catch (e) {
+      errEl.textContent = '网络错误：' + e.message;
+    }
+  }
+
+  /* ── 数据加载 ── */
+  async function loadData() {
+    try {
+      var res = await fetch(SB_URL + '/rest/v1/rpc/admin_get_visitors', {
+        method: 'POST',
+        headers: {
+          'apikey': SB_KEY,
+          'Authorization': 'Bearer ' + token,
+          'Content-Type': 'application/json'
+        },
+        body: '{}'
+      });
+      if (res.status === 401 || res.status === 403) {
+        throw new Error('UNAUTHORIZED');
+      }
+      if (!res.ok) {
+        var t = await res.text();
+        throw new Error('API_ERROR:' + res.status + ' ' + t.slice(0, 120));
+      }
+      var data = await res.json();
+      allData = Array.isArray(data) ? data : [];
+      render();
+    } catch (e) {
+      if (e.message === 'UNAUTHORIZED') {
+        clearToken();
+        showLogin();
+        $('login-err').textContent = '登录已过期，请重新登录';
+      } else {
+        toast('加载失败：' + e.message);
+      }
+    }
+  }
+
+  /* ── 过滤 ── */
+  function currentFiltered() {
+    var q = ($('search-input').value || '').trim().toLowerCase();
+    if (!q) return allData;
+    return allData.filter(function (r) {
+      var hay = [
+        r.public_ip, r.ip_region, r.ip_city, r.isp, r.ip_asn_owner,
+        r.local_ip, r.platform, r.user_agent, r.ip_type, r.ip_line_type
+      ].join(' ').toLowerCase();
+      return hay.indexOf(q) !== -1;
+    });
+  }
+
+  /* ── 渲染 ── */
+  function render() {
+    // 统计
+    $('stat-visitors').textContent = allData.length;
+    var totalVisits = 0, regions = {};
+    allData.forEach(function (r) {
+      totalVisits += (r.visit_count || 1);
+      var k = (r.ip_region || '未知').split('/')[0];
+      regions[k] = (regions[k] || 0) + 1;
+    });
+    $('stat-visits').textContent = totalVisits;
+    $('stat-regions').textContent = Object.keys(regions).length;
+    $('stat-last').textContent = allData.length ? fmtTime(allData[0].last_seen_at || allData[0].created_at) : '–';
+
+    // 表格
+    var rows = currentFiltered();
+    var tb = $('table-body');
+    if (!rows.length) {
+      tb.innerHTML = '<tr><td colspan="10" class="empty">暂无数据' + (allData.length ? '（无匹配）' : '') + '</td></tr>';
+      return;
+    }
+    tb.innerHTML = rows.map(function (r, i) {
+      var isp = r.isp || r.ip_asn_owner || r.ip_isp_owner || '';
+      var typeTxt = r.ip_type || r.ip_line_type || '';
+      var qs = r.ip_quality_score;
+      var quals = '';
+      if (qs) quals += '<span class="tag gray">质量 ' + qs + '</span> ';
+      if (r.ip_is_proxy && r.ip_is_proxy === 'yes') quals += '<span class="tag" style="background:#4a2a2a;color:#f85149;border-color:#6a3a3a">代理</span> ';
+      var time = r.last_seen_at || r.created_at;
+      var detail = JSON.stringify(r, null, 2);
+      return '<tr>' +
+        '<td class="muted">' + (i + 1) + '</td>' +
+        '<td><span class="ip">' + esc(r.public_ip || '–') + '</span></td>' +
+        '<td>' + esc(r.ip_region || r.ip_city || '–') + (r.ip_city && r.ip_city !== r.ip_region ? '<div class="muted" style="font-size:11px">' + esc(r.ip_city) + '</div>' : '') + '</td>' +
+        '<td style="max-width:200px">' + esc(isp || '–') + '</td>' +
+        '<td>' + esc(typeTxt || '–') + ' ' + quals + '</td>' +
+        '<td class="ip">' + esc(r.local_ip || '–') + '</td>' +
+        '<td>' + esc(r.platform || '–') + '</td>' +
+        '<td><span class="count-badge">' + (r.visit_count || 1) + '</span></td>' +
+        '<td class="muted">' + fmtTime(time) + '</td>' +
+        '<td><button class="ghost-btn" style="padding:4px 10px;font-size:12px" onclick="window.__toggleDetail(this)">详情</button></td>' +
+        '</tr>' +
+        '<tr class="row-detail hidden" data-detail>' +
+        '<td colspan="10"><pre>' + esc(detail) + '</pre></td>' +
+        '</tr>';
+    }).join('');
+  }
+
+  window.__toggleDetail = function (btn) {
+    var tr = btn.closest('tr');
+    var detail = tr.nextElementSibling;
+    if (detail && detail.hasAttribute('data-detail')) {
+      detail.classList.toggle('hidden');
+      btn.textContent = detail.classList.contains('hidden') ? '详情' : '收起';
+    }
+  };
+
+  /* ── 导出 CSV ── */
+  function exportCsv() {
+    var rows = currentFiltered();
+    if (!rows.length) { toast('没有可导出的数据'); return; }
+    var keys = ['id', 'created_at', 'last_seen_at', 'visit_count', 'public_ip', 'ip_region', 'ip_city',
+      'isp', 'ip_asn', 'ip_cidr', 'ip_lat', 'ip_lon', 'ip_zip', 'ip_timezone', 'ip_type', 'ip_line_type',
+      'ip_quality_score', 'ip_is_proxy', 'ip_is_vpn', 'ip_is_tor', 'ip_is_datacenter', 'ip_fraud_score',
+      'local_ip', 'platform', 'screen_res', 'language', 'timezone', 'user_agent', 'referrer', 'page_url'];
+    var header = keys.join(',');
+    var lines = rows.map(function (r) {
+      return keys.map(function (k) {
+        var v = r[k];
+        if (v == null) return '';
+        v = String(v);
+        return /[",\n]/.test(v) ? '"' + v.replace(/"/g, '""') + '"' : v;
+      }).join(',');
+    });
+    var csv = header + '\n' + lines.join('\n');
+    var blob = new Blob(['\ufeff' + csv], { type: 'text/csv;charset=utf-8;' });
+    var a = document.createElement('a');
+    a.href = URL.createObjectURL(blob);
+    a.download = 'visitor_logs_' + new Date().toISOString().slice(0, 10) + '.csv';
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    URL.revokeObjectURL(a.href);
+    toast('已导出 ' + rows.length + ' 条');
+  }
+
+  /* ── 视图切换 ── */
+  function showLogin() {
+    $('login-view').classList.remove('hidden');
+    $('main-view').classList.add('hidden');
+  }
+  function showMain() {
+    $('login-view').classList.add('hidden');
+    $('main-view').classList.remove('hidden');
+  }
+
+  /* ── 事件 ── */
+  $('login-btn').addEventListener('click', function () {
+    var e = $('login-email').value.trim();
+    var p = $('login-pass').value;
+    if (!e || !p) { $('login-err').textContent = '请输入邮箱和密码'; return; }
+    $('login-btn').disabled = true;
+    login(e, p).finally(function () { $('login-btn').disabled = false; });
+  });
+  $('login-pass').addEventListener('keydown', function (ev) {
+    if (ev.key === 'Enter') $('login-btn').click();
+  });
+  $('logout-btn').addEventListener('click', function () {
+    clearToken();
+    showLogin();
+    $('login-err').textContent = '';
+    toast('已退出');
+  });
+  $('search-input').addEventListener('input', function () { render(); });
+  $('export-btn').addEventListener('click', exportCsv);
+  $('refresh-btn').addEventListener('click', function () { loadData().then(function () { toast('已刷新'); }); });
+
+  /* ── 启动 ── */
+  (function init() {
+    var t = getToken();
+    if (t) {
+      token = t;
+      showMain();
+      loadData().catch(function () {});
+    }
+  })();
+})();
+</script>
+</body>
+</html>
